@@ -73,7 +73,7 @@ public class CameraCapture extends SurfaceCapture {
     private final Size explicitSize;
     private final CameraAspectRatio aspectRatio;
     private final int fps;
-    private final boolean highSpeed;
+    private boolean highSpeed;
     private final AtomicBoolean fpsReported = new AtomicBoolean();
     private final Rect crop;
     private final Orientation captureOrientation;
@@ -146,6 +146,15 @@ public class CameraCapture extends SurfaceCapture {
     public void prepare() throws IOException {
         try {
             int maxSize = videoConstraints.getMaxSize();
+            // A high speed session rejects any surface that is not in the camera's
+            // high speed size list, and it throws rather than falling back. Some
+            // cameras expose no high speed sizes at all, so check before asking.
+            if (highSpeed && !isHighSpeedSupported(cameraId, explicitSize)) {
+                Ln.w("High speed capture is not available for camera " + cameraId
+                    + (explicitSize == null ? "" : " at " + explicitSize.getWidth() + "x" + explicitSize.getHeight())
+                    + ", falling back to a regular capture session");
+                highSpeed = false;
+            }
             captureSize = selectSize(cameraId, explicitSize, maxSize, aspectRatio, highSpeed);
             if (captureSize == null) {
                 throw new IOException("Could not select camera size");
@@ -209,6 +218,28 @@ public class CameraCapture extends SurfaceCapture {
 
         // Not found
         return null;
+    }
+
+    @TargetApi(AndroidVersions.API_24_ANDROID_7_0)
+    private static boolean isHighSpeedSupported(String cameraId, Size explicitSize)
+            throws CameraAccessException {
+        CameraManager cameraManager = ServiceManager.getCameraManager();
+        CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+        StreamConfigurationMap configs = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        android.util.Size[] sizes = configs.getHighSpeedVideoSizes();
+        if (sizes == null || sizes.length == 0) {
+            return false;
+        }
+        if (explicitSize == null) {
+            // selectSize() will pick from the high speed list, so it will match.
+            return true;
+        }
+        for (android.util.Size size : sizes) {
+            if (size.getWidth() == explicitSize.getWidth() && size.getHeight() == explicitSize.getHeight()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @TargetApi(AndroidVersions.API_24_ANDROID_7_0)
