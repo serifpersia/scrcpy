@@ -8,3 +8,6 @@ build/
 /x/
 local.properties
 /scrcpy-server
+
+cam_client/
+

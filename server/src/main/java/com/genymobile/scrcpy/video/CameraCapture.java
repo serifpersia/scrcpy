@@ -56,6 +56,16 @@ public class CameraCapture extends SurfaceCapture {
 
     private static final float ZOOM_FACTOR = 1 + 1 / 16f;
 
+    // Manual camera parameters, selectable by the client through the
+    // TYPE_CAMERA_SET_PARAM control message. Values are always sent as an int, so
+    // float parameters use a fixed-point representation (see below).
+    public static final int PARAM_AF_MODE = 0; // CaptureRequest.CONTROL_AF_MODE
+    public static final int PARAM_FOCUS_DISTANCE = 1; // LENS_FOCUS_DISTANCE, diopters * 1000
+    public static final int PARAM_AE_MODE = 2; // CaptureRequest.CONTROL_AE_MODE
+    public static final int PARAM_EXPOSURE_TIME = 3; // SENSOR_EXPOSURE_TIME, nanoseconds
+    public static final int PARAM_SENSITIVITY = 4; // SENSOR_SENSITIVITY, ISO
+    public static final int PARAM_AF_TRIGGER = 5; // triggers a single AF pass, no payload
+
     private final String explicitCameraId;
     private final CameraFacing cameraFacing;
     private final Size explicitSize;
@@ -74,6 +84,8 @@ public class CameraCapture extends SurfaceCapture {
     private Size captureSize;
     private Size videoSize; // after OpenGL transforms
     private Range<Float> zoomRange;
+    private Range<Integer> sensitivityRange;
+    private Range<Long> exposureTimeRange;
 
     private AffineMatrix transform;
     private OpenGLRunner glRunner;
@@ -166,11 +178,16 @@ public class CameraCapture extends SurfaceCapture {
 
         String[] cameraIds = cameraManager.getCameraIdList();
         if (explicitCameraId != null) {
-            if (!Arrays.asList(cameraIds).contains(explicitCameraId)) {
+            // Validate by probing the characteristics, NOT by list membership: some OEMs
+            // hide the wide/tele cameras from getCameraIdList() while the HAL still
+            // opens them by numeric id, so a membership check would reject real lenses.
+            try {
+                cameraManager.getCameraCharacteristics(explicitCameraId);
+                return explicitCameraId;
+            } catch (IllegalArgumentException | CameraAccessException e) {
                 Ln.e("Camera with id " + explicitCameraId + " not found\n" + LogUtils.buildCameraListMessage(false));
                 throw new ConfigurationException("Camera id not found");
             }
-            return explicitCameraId;
         }
 
         if (cameraFacing == null) {
@@ -306,6 +323,8 @@ public class CameraCapture extends SurfaceCapture {
                 try {
                     CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
                     zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
+                    sensitivityRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+                    exposureTimeRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
                 } catch (CameraAccessException e) {
                     Ln.w("Could not get camera characteristics");
                 }
@@ -459,7 +478,8 @@ public class CameraCapture extends SurfaceCapture {
 
             @Override
             public void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
-                Ln.w("Camera capture failed: frame " + failure.getFrameNumber());
+                Ln.w("Camera capture failed: frame " + failure.getFrameNumber()
+                    + ", reason " + failure.getReason());
             }
         };
 
@@ -531,6 +551,113 @@ public class CameraCapture extends SurfaceCapture {
         }
 
         return zoomRange.clamp(value);
+    }
+
+    /**
+ * Set a manual camera parameter.
+ *
+ * <p>Values are clamped to the range reported by the camera characteristics, because
+ * {@link CaptureRequest.Builder#set()} throws for an out-of-range value.
+ *
+ * <p>Camera2 ignores a manual value while the corresponding auto mode is on, so the mode is
+ * forced to OFF as a side effect.
+ */
+    public void setParam(int param, int value) {
+        cameraHandler.post(() -> {
+            assertCameraThread();
+            if (currentSession == null || requestBuilder == null) {
+                return; // the session is not configured yet
+            }
+
+            try {
+                if (applyParam(param, value)) {
+                    CaptureRequest request = requestBuilder.build();
+                    setRepeatingRequest(currentSession, request);
+                }
+            } catch (CameraAccessException | IllegalArgumentException e) {
+                Ln.e("Could not set camera parameter " + param + " to " + value, e);
+            }
+        });
+    }
+
+    private boolean applyParam(int param, int value) {
+        assertCameraThread();
+
+        // Set the value before the mode, so that a rejected value leaves the request builder
+        // untouched
+        switch (param) {
+            case PARAM_AF_MODE:
+                Ln.i("Set camera AF mode: " + value);
+                requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, value);
+                return true;
+
+            case PARAM_FOCUS_DISTANCE:
+                applyFocusDistance(value);
+                return true;
+
+            case PARAM_AE_MODE:
+                Ln.i("Set camera AE mode: " + value);
+                requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, value);
+                return true;
+
+            case PARAM_EXPOSURE_TIME:
+                applyExposureTime(value);
+                return true;
+
+            case PARAM_SENSITIVITY:
+                applySensitivity(value);
+                return true;
+
+            case PARAM_AF_TRIGGER:
+                // CONTROL_AF_MODE_AUTO focuses only when triggered
+                Ln.i("Trigger autofocus");
+                requestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+                                   CaptureRequest.CONTROL_AF_TRIGGER_START);
+                requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO);
+                return true;
+
+            default:
+                Ln.w("Unknown camera parameter: " + param);
+                return false;
+        }
+    }
+
+    private void applyFocusDistance(int value) {
+        assertCameraThread();
+
+        // 0 diopters means infinity and larger values are closer, so the device minimum
+        // is the closest it can focus: clamp only against negative values.
+        float diopters = Math.max(value / 1000f, 0.f);
+        Ln.i("Set camera focus distance: " + diopters + " diopters");
+        requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, diopters);
+        requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF);
+    }
+
+    private void applyExposureTime(int value) {
+        assertCameraThread();
+
+        long nanos = clamp((long) value, exposureTimeRange);
+        Ln.i("Set camera exposure time: " + nanos + " ns");
+        requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, nanos);
+        requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+    }
+
+    private void applySensitivity(int value) {
+        assertCameraThread();
+
+        int iso = clamp(value, sensitivityRange);
+        Ln.i("Set camera sensitivity: " + iso);
+        requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
+        requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+    }
+
+    private static <T extends Comparable<T>> T clamp(T value, Range<T> range) {
+        // A missing range means the characteristics could not be read: trust the client
+        if (range == null) {
+            return value;
+        }
+
+        return range.clamp(value);
     }
 
     private void assertCameraThread() {

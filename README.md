@@ -5,6 +5,15 @@ their name contains `scrcpy`.**
 
 # scrcpy (v5.0.1)
 
+> [!NOTE]
+> **Fork.** This repository adds manual camera parameters to camera streaming
+> ([`--video-source=camera`](doc/camera.md)): focus distance, autofocus mode and
+> trigger, exposure time, sensitivity (ISO), plus the focus/ISO/exposure ranges
+> reported by the device in [`--list-cameras`](doc/camera.md#list). It also lists
+> the wide and telephoto cameras that some devices hide behind a single logical
+> camera. Changes are limited to the `server/` module; the official client is
+> unchanged.
+
 <img src="app/data/scrcpy.svg" width="128" height="128" alt="scrcpy" align="right" />
 
 _pronounced "**scr**een **c**o**py**"_

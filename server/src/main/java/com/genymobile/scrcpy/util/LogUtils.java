@@ -25,8 +25,12 @@ import android.os.Build;
 import android.util.Range;
 
 import java.text.DecimalFormat;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Objects;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -141,12 +145,28 @@ public final class LogUtils {
         StringBuilder builder = new StringBuilder("List of cameras:");
         CameraManager cameraManager = ServiceManager.getCameraManager();
         try {
-            String[] cameraIds = cameraManager.getCameraIdList();
-            if (cameraIds.length == 0) {
+            // Some OEMs hide the wide/tele cameras from getCameraIdList(), but the HAL
+            // still opens them by numeric id.
+            List<String> cameraIds = new ArrayList<>(Arrays.asList(cameraManager.getCameraIdList()));
+            for (int n = 0; n <= 7; ++n) {
+                String id = String.valueOf(n);
+                if (!cameraIds.contains(id)) {
+                    cameraIds.add(id);
+                }
+            }
+
+            if (cameraIds.isEmpty()) {
                 builder.append("\n    (none)");
             } else {
+                Set<String> seen = new HashSet<>();
                 for (String id : cameraIds) {
-                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
+                    CameraCharacteristics characteristics;
+                    try {
+                        characteristics = cameraManager.getCameraCharacteristics(id);
+                    } catch (IllegalArgumentException | CameraAccessException e) {
+                        // Not a real camera on this device
+                        continue;
+                    }
 
                     if (!isCameraBackwardCompatible(characteristics)) {
                         // Ignore depth cameras as suggested by official documentation
@@ -154,10 +174,23 @@ public final class LogUtils {
                         continue;
                     }
 
-                    builder.append("\n    --camera-id=").append(id);
-
                     int facing = characteristics.get(CameraCharacteristics.LENS_FACING);
-                    builder.append("    (").append(getCameraFacingName(facing)).append(", ");
+
+                    // Focal length identifies the lens
+                    float[] focals = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS);
+                    float focal = (focals != null && focals.length > 0) ? focals[0] : 0.f;
+
+                    // Several ids can be alternative streams of the same physical lens
+                    if (!seen.add(getCameraFacingName(facing) + "@" + (int) (focal * 10))) {
+                        continue;
+                    }
+
+                    builder.append("\n    --camera-id=").append(id);
+                    builder.append("\n    (").append(getCameraFacingName(facing)).append(", ");
+
+                    if (focal > 0) {
+                        builder.append(new DecimalFormat("#.#").format(focal)).append("mm, ");
+                    }
 
                     Rect activeSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
                     builder.append(activeSize.width()).append("x").append(activeSize.height());
@@ -184,6 +217,25 @@ public final class LogUtils {
                         } catch (Exception e) {
                             Ln.w("Could not get available zoom ranges for camera " + id, e);
                         }
+                    }
+
+                    // Manual control ranges, so a client can bound its controls
+                    DecimalFormat format = new DecimalFormat("#.##");
+                    Float minFocusDistance = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
+                    if (minFocusDistance != null) {
+                        builder.append(", focus-range=[").append(format.format(minFocusDistance)).append(", inf]");
+                    }
+
+                    Range<Integer> sensitivityRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+                    if (sensitivityRange != null) {
+                        builder.append(", iso-range=[").append(sensitivityRange.getLower()).append(", ")
+                                .append(sensitivityRange.getUpper()).append(']');
+                    }
+
+                    Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+                    if (exposureRange != null) {
+                        builder.append(", exp-range=[").append(exposureRange.getLower()).append(", ")
+                                .append(exposureRange.getUpper()).append(']');
                     }
 
                     builder.append(')');
@@ -297,3 +349,5 @@ public final class LogUtils {
         return builder.toString();
     }
 }
+
+

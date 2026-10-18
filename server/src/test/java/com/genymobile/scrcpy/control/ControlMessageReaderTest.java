@@ -1,5 +1,7 @@
 package com.genymobile.scrcpy.control;
 
+import com.genymobile.scrcpy.video.CameraCapture;
+
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import org.junit.Assert;
@@ -468,6 +470,46 @@ public class ControlMessageReaderTest {
 
         ControlMessage event = reader.read();
         Assert.assertEquals(ControlMessage.TYPE_CAMERA_ZOOM_OUT, event.getType());
+
+        Assert.assertEquals(-1, bis.read()); // EOS
+    }
+
+    @Test
+    public void testParseCameraSetParam() throws IOException {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        DataOutputStream dos = new DataOutputStream(bos);
+        dos.writeByte(ControlMessage.TYPE_CAMERA_SET_PARAM);
+        dos.writeByte(CameraCapture.PARAM_FOCUS_DISTANCE);
+        dos.writeInt(2500); // 2.5 diopters
+        byte[] packet = bos.toByteArray();
+
+        ByteArrayInputStream bis = new ByteArrayInputStream(packet);
+        ControlMessageReader reader = new ControlMessageReader(bis);
+
+        ControlMessage event = reader.read();
+        Assert.assertEquals(ControlMessage.TYPE_CAMERA_SET_PARAM, event.getType());
+        Assert.assertEquals(CameraCapture.PARAM_FOCUS_DISTANCE, event.getParam());
+        Assert.assertEquals(2500, event.getValue());
+
+        Assert.assertEquals(-1, bis.read()); // EOS
+    }
+
+    @Test
+    public void testParseCameraSetParamNegativeValue() throws IOException {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        DataOutputStream dos = new DataOutputStream(bos);
+        dos.writeByte(ControlMessage.TYPE_CAMERA_SET_PARAM);
+        dos.writeByte(CameraCapture.PARAM_EXPOSURE_TIME);
+        dos.writeInt(-1); // must survive parsing, the server clamps it
+        byte[] packet = bos.toByteArray();
+
+        ByteArrayInputStream bis = new ByteArrayInputStream(packet);
+        ControlMessageReader reader = new ControlMessageReader(bis);
+
+        ControlMessage event = reader.read();
+        Assert.assertEquals(ControlMessage.TYPE_CAMERA_SET_PARAM, event.getType());
+        Assert.assertEquals(CameraCapture.PARAM_EXPOSURE_TIME, event.getParam());
+        Assert.assertEquals(-1, event.getValue());
 
         Assert.assertEquals(-1, bis.read()); // EOS
     }

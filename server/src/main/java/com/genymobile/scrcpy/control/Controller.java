@@ -432,6 +432,9 @@ public class Controller implements AsyncProcessor, VirtualDisplayListener {
                 case ControlMessage.TYPE_CAMERA_ZOOM_OUT:
                     cameraCapture.zoomOut();
                     return true;
+                case ControlMessage.TYPE_CAMERA_SET_PARAM:
+                    cameraCapture.setParam(msg.getParam(), msg.getValue());
+                    return true;
                 default:
                     // fall through
             }

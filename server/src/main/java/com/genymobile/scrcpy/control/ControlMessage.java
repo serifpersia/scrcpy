@@ -30,6 +30,7 @@ public final class ControlMessage {
     public static final int TYPE_CAMERA_ZOOM_OUT = 20;
     public static final int TYPE_RESIZE_DISPLAY = 21;
     public static final int TYPE_SCAN_FILE = 22;
+    public static final int TYPE_CAMERA_SET_PARAM = 23;
 
     public static final long SEQUENCE_INVALID = 0;
 
@@ -60,6 +61,8 @@ public final class ControlMessage {
     private int productId;
     private int width;
     private int height;
+    private int param;
+    private int value;
 
     private ControlMessage() {
     }
@@ -195,6 +198,14 @@ public final class ControlMessage {
         return msg;
     }
 
+    public static ControlMessage createCameraSetParam(int param, int value) {
+        ControlMessage msg = new ControlMessage();
+        msg.type = TYPE_CAMERA_SET_PARAM;
+        msg.param = param;
+        msg.value = value;
+        return msg;
+    }
+
     public int getType() {
         return type;
     }
@@ -285,5 +296,13 @@ public final class ControlMessage {
 
     public int getHeight() {
         return height;
+    }
+
+    public int getParam() {
+        return param;
+    }
+
+    public int getValue() {
+        return value;
     }
 }
