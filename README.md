@@ -234,6 +234,9 @@ work][donate]:
     Copyright (C) 2018 Genymobile
     Copyright (C) 2018-2026 Romain Vimont
 
+    Modifications in this fork (manual camera parameters) are
+    Copyright (C) 2026 serifpersia, under the same terms.
+
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
     You may obtain a copy of the License at
