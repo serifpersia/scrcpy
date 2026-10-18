@@ -25,6 +25,8 @@ import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
+import android.util.Range;
+import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
@@ -72,6 +74,7 @@ public class CameraCapture extends SurfaceCapture {
     private final CameraAspectRatio aspectRatio;
     private final int fps;
     private final boolean highSpeed;
+    private final AtomicBoolean fpsReported = new AtomicBoolean();
     private final Rect crop;
     private final Orientation captureOrientation;
     private final float angle;
@@ -480,6 +483,18 @@ public class CameraCapture extends SurfaceCapture {
             public void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
                 Ln.w("Camera capture failed: frame " + failure.getFrameNumber()
                     + ", reason " + failure.getReason());
+            }
+
+            @Override
+            public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request,
+                                            TotalCaptureResult result) {
+                // The requested fps range is only a wish; report the one the
+                // camera actually settled on, so a silent clamp is visible.
+                if (fpsReported.compareAndSet(false, true)) {
+                    Range<Integer> range = result.get(TotalCaptureResult.CONTROL_AE_TARGET_FPS_RANGE);
+                    Ln.i("Effective FPS range: " + range + " (requested " + fps
+                        + ", highSpeed=" + highSpeed + ")");
+                }
             }
         };
 
